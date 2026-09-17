@@ -1,13 +1,19 @@
 import {initialConfiguration,initialExercises,initialGoals} from './config.js';
-export const DATABASE_VERSION=3;
+import {phase2Seed} from './training-data.js';
+export const DATABASE_VERSION=5;
 export const BASE_STORES=['preferences','sessions','water','routineLogs','events','attempts','metrics','checkins','rewards','templates'];
-export const stores=[...BASE_STORES,'configurations','exercises','goals','dailyStates','edits'];
+export const PHASE2_STORES=['skillDefinitions','soreness','equipmentProfiles','records','recordEvents','masteryAwards','personalRecurrences'];
+export const stores=[...BASE_STORES,'configurations','exercises','goals','dailyStates','edits',...PHASE2_STORES];
 // Append one migration per released version; preserve old migrations unchanged.
 export const migrations=[{version:1,upgrade(db){for(const s of BASE_STORES)db.createObjectStore(s,{keyPath:'id'})}},{version:2,upgrade(db,transaction){for(const s of ['configurations','exercises','goals','dailyStates','edits'])db.createObjectStore(s,{keyPath:'id'});for(const s of ['sessions','water','routineLogs','events','attempts','metrics','checkins','rewards'])transaction.objectStore(s).createIndex('date','date',{unique:false});transaction.objectStore('edits').createIndex('recordId','recordId',{unique:false});transaction.objectStore('configurations').put(initialConfiguration);for(const e of initialExercises)transaction.objectStore('exercises').put(e);for(const g of initialGoals)transaction.objectStore('goals').put(g)}}];
 // Pre-action-layer pilot builds could create two Main slots in two open tabs.
 // Preserve both records; completed work owns the slot and duplicates stay archived.
 export function normalizeSessionSlots(sessions){const groups=new Map();for(const s of sessions.filter(s=>['Main','Second'].includes(s.kind))){const key=s.date+':'+s.kind;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(s)}for(const [key,list] of groups){list.sort((a,b)=>Number(b.status==='completed')-Number(a.status==='completed')||String(a.startedAt||a.id).localeCompare(String(b.startedAt||b.id)));const primary=list[0];primary.slotKey=key;delete primary.supersededBy;for(const duplicate of list.slice(1)){delete duplicate.slotKey;duplicate.supersededBy=primary.id}}return sessions}
 migrations.push({version:3,upgrade(db,transaction){const s=transaction.objectStore('sessions');s.createIndex('slotKey','slotKey',{unique:true});const r=s.getAll();r.onsuccess=()=>{for(const record of normalizeSessionSlots(r.result))s.put(record)}}});
+migrations.push({version:4,upgrade(db,transaction){for(const name of PHASE2_STORES)db.createObjectStore(name,{keyPath:'id'});const seed=phase2Seed();for(const s of seed.skills)transaction.objectStore('skillDefinitions').put(s);for(const p of seed.equipment)transaction.objectStore('equipmentProfiles').put(p);const exercises=transaction.objectStore('exercises'),existing=exercises.getAll();existing.onsuccess=()=>{for(const e of seed.exercises){const prior=existing.result.find(p=>p.id===e.id);exercises.put({...e,...(prior?{name:prior.name,targetMuscles:prior.targetMuscles,safety:{...e.safety,cues:prior.safety.cues}}:{})})}};for(const name of ['soreness','recordEvents','masteryAwards'])transaction.objectStore(name).createIndex('date','date',{unique:false})}});
+// Trial-specific movements preserve the original hang requirement separately from scapular reps.
+export function normalizeTrialMovements(skills){for(const skill of skills)for(const level of skill.levelDefinitions)for(const r of level.requirements)if(!r.exerciseId)r.exerciseId=skill.id==='pull'&&level.id==='pull-0'&&r.id==='endurance'?'hang':level.exerciseId;return skills}
+migrations.push({version:5,upgrade(db,transaction){const store=transaction.objectStore('skillDefinitions'),r=store.getAll();r.onsuccess=()=>{for(const skill of normalizeTrialMovements(r.result))store.put(skill)}}});
 export const dayKey=(date=new Date())=>`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 export const uid=()=>crypto.randomUUID();
 const request=r=>new Promise((resolve,reject)=>{r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});
