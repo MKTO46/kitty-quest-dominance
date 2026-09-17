@@ -1,0 +1,1 @@
+{"name":"kitty-quest-dominance","private":true,"type":"module","scripts":{"start":"node serve.cjs","test":"node --test --test-isolation=none tests/*.test.js"},"devDependencies":{"fake-indexeddb":"^6.2.5"}}

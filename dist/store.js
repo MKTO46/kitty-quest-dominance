@@ -1,0 +1,27 @@
+import {initialConfiguration,initialExercises,initialGoals} from './config.js';
+export const DATABASE_VERSION=3;
+export const BASE_STORES=['preferences','sessions','water','routineLogs','events','attempts','metrics','checkins','rewards','templates'];
+export const stores=[...BASE_STORES,'configurations','exercises','goals','dailyStates','edits'];
+// Append one migration per released version; preserve old migrations unchanged.
+export const migrations=[{version:1,upgrade(db){for(const s of BASE_STORES)db.createObjectStore(s,{keyPath:'id'})}},{version:2,upgrade(db,transaction){for(const s of ['configurations','exercises','goals','dailyStates','edits'])db.createObjectStore(s,{keyPath:'id'});for(const s of ['sessions','water','routineLogs','events','attempts','metrics','checkins','rewards'])transaction.objectStore(s).createIndex('date','date',{unique:false});transaction.objectStore('edits').createIndex('recordId','recordId',{unique:false});transaction.objectStore('configurations').put(initialConfiguration);for(const e of initialExercises)transaction.objectStore('exercises').put(e);for(const g of initialGoals)transaction.objectStore('goals').put(g)}}];
+// Pre-action-layer pilot builds could create two Main slots in two open tabs.
+// Preserve both records; completed work owns the slot and duplicates stay archived.
+export function normalizeSessionSlots(sessions){const groups=new Map();for(const s of sessions.filter(s=>['Main','Second'].includes(s.kind))){const key=s.date+':'+s.kind;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(s)}for(const [key,list] of groups){list.sort((a,b)=>Number(b.status==='completed')-Number(a.status==='completed')||String(a.startedAt||a.id).localeCompare(String(b.startedAt||b.id)));const primary=list[0];primary.slotKey=key;delete primary.supersededBy;for(const duplicate of list.slice(1)){delete duplicate.slotKey;duplicate.supersededBy=primary.id}}return sessions}
+migrations.push({version:3,upgrade(db,transaction){const s=transaction.objectStore('sessions');s.createIndex('slotKey','slotKey',{unique:true});const r=s.getAll();r.onsuccess=()=>{for(const record of normalizeSessionSlots(r.result))s.put(record)}}});
+export const dayKey=(date=new Date())=>`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+export const uid=()=>crypto.randomUUID();
+const request=r=>new Promise((resolve,reject)=>{r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});
+export class Repository{
+ constructor(factory=globalThis.indexedDB,name='kitty-quest-dominance'){this.factory=factory;this.name=name}
+ async open(){this.db=await new Promise((resolve,reject)=>{const r=this.factory.open(this.name,DATABASE_VERSION);r.onupgradeneeded=e=>{for(const m of migrations)if(m.version>e.oldVersion&&m.version<=DATABASE_VERSION)m.upgrade(r.result,r.transaction)};r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);r.onblocked=()=>reject(Error('Close other Kitty Quest tabs to update the database.'))});this.db.onversionchange=()=>this.db.close();return this}
+ close(){this.db?.close()}
+ async transact(names,work,mode='readwrite'){const tx=this.db.transaction(names,mode);const completed=new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error||Error('Storage transaction failed.'));tx.onabort=()=>reject(tx.error||Error('Storage transaction was cancelled.'))});const api={all:s=>request(tx.objectStore(s).getAll()),get:(s,id)=>request(tx.objectStore(s).get(id)),put:(s,r)=>request(tx.objectStore(s).put(structuredClone(r))),clear:s=>request(tx.objectStore(s).clear())};try{const result=await work(api);await completed;return result}catch(error){try{tx.abort()}catch{}await completed.catch(()=>{});throw error}}
+ all(s){return this.transact([s],t=>t.all(s),'readonly')}
+ put(s,r){return this.transact([s],async t=>{if(s==='sessions'){const existing=await t.get(s,r.id);if(existing&&['completed','partial'].includes(existing.status)&&JSON.stringify(existing)!==JSON.stringify(r))throw Error('Historical sessions require a tracked correction action.')}if(s==='rewards'){const existing=await t.get(s,r.id);if(existing&&JSON.stringify(existing)!==JSON.stringify(r))throw Error('Reward entries are immutable.')}await t.put(s,r);return r})}
+ snapshot(){return this.transact(stores,async t=>({schemaVersion:DATABASE_VERSION,format:'kitty-quest-backup',exportedAt:new Date().toISOString(),tables:Object.fromEntries(await Promise.all(stores.map(async s=>[s,await t.all(s)])))}),'readonly')}
+}
+export const repository=new Repository();
+export const openStore=()=>repository.open();
+export const all=s=>repository.all(s);
+export const put=(s,r)=>repository.put(s,r);
+export const exportData=()=>repository.snapshot();

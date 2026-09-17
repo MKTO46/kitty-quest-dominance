@@ -9,4 +9,3 @@ Install test dependencies with `pnpm install --frozen-lockfile`; run `pnpm test`
 Profile contains Export Backup / Import Backup. Database schema is version 3. Never edit an already released schema migration; append a new version. Legacy app migration is deliberately deferred.
 
 User records are device/origin-local. Moving between a local preview and a hosted origin requires exporting and restoring a backup. Serving source does not upload the user's IndexedDB records.
-
