@@ -2,6 +2,8 @@ import {DATABASE_VERSION,stores,BASE_STORES,repository,normalizeSessionSlots,nor
 import {initialConfiguration,initialExercises,initialGoals,validateGoalGraph} from './config.js';
 import {phase2Seed} from './training-data.js';
 import {validatePersonalBlock} from './schedule.js';
+import {gameSeeds,legacyLedger} from './game-data.js';
+import {validateGameTables} from './game-backup.js';
 const array=(v,label)=>{if(!Array.isArray(v))throw Error('Invalid '+label);return v};
 const num=(v,min,max,label)=>{if(typeof v!=='number'||!Number.isFinite(v)||v<min||v>max)throw Error('Invalid '+label)};
 const text=(v,label)=>{if(typeof v!=='string'||v.length>10000)throw Error('Invalid '+label)};
@@ -10,6 +12,7 @@ const date=v=>{if(typeof v!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(v)||Number.is
 export const backupMigrations={1:backup=>{for(const s of BASE_STORES)array(backup.tables[s],s);return {...backup,format:'kitty-quest-backup',schemaVersion:2,tables:{...backup.tables,configurations:[initialConfiguration],exercises:initialExercises,goals:initialGoals,dailyStates:[],edits:[]}}},2:backup=>({...backup,schemaVersion:3,tables:{...backup.tables,sessions:normalizeSessionSlots(array(backup.tables.sessions,'sessions'))}})};
 backupMigrations[3]=backup=>{const seed=phase2Seed(),prior=array(backup.tables.exercises,'exercises');return {...backup,schemaVersion:4,tables:{...backup.tables,exercises:[...seed.exercises.map(e=>({...e,...(prior.find(p=>p.id===e.id)?{name:prior.find(p=>p.id===e.id).name}: {})})),...prior.filter(p=>!seed.exercises.some(e=>e.id===p.id))],skillDefinitions:seed.skills,soreness:[],equipmentProfiles:seed.equipment,records:[],recordEvents:[],masteryAwards:[],personalRecurrences:[]}}};
 backupMigrations[4]=backup=>({...backup,schemaVersion:5,tables:{...backup.tables,skillDefinitions:normalizeTrialMovements(backup.tables.skillDefinitions)}});
+backupMigrations[5]=backup=>{const seed=gameSeeds();return {...backup,schemaVersion:6,tables:{...backup.tables,gameConfigurations:[seed.configuration],rewardLedger:legacyLedger(backup.tables.rewards),gameQuests:[],gameBadges:[],bossClears:[],pillarPlans:[],gameInventory:[seed.inventory,seed.title],gameProfile:[seed.profile],gameCelebrations:[]}}};
 export function validateBackup(input){let backup=structuredClone(input);if(!backup||!Number.isInteger(backup.schemaVersion)||backup.schemaVersion<1||backup.schemaVersion>DATABASE_VERSION)throw Error('Unsupported backup version.');if(!backup.tables||typeof backup.tables!=='object')throw Error('Backup tables are missing.');while(backup.schemaVersion<DATABASE_VERSION)backup=backupMigrations[backup.schemaVersion](backup);if(backup.format!=='kitty-quest-backup')throw Error('Not a Kitty Quest backup.');if(Object.keys(backup.tables).some(k=>!stores.includes(k)))throw Error('Unexpected backup table.');for(const store of stores){const rows=array(backup.tables[store],store),ids=new Set();if(rows.length>100000)throw Error('Backup table is too large.');for(const r of rows){if(!r||typeof r!=='object'||typeof r.id!=='string'||!r.id||ids.has(r.id))throw Error('Invalid or duplicate ID in '+store);ids.add(r.id);if(r.date!==undefined)date(r.date)}}
  const t=backup.tables;
  for(const r of t.preferences){text(r.name,'player name');num(r.waterTarget,1,256,'water target');date(r.transformationStart);if(!r.memory||Object.values(r.memory).some(v=>typeof v!=='boolean'))throw Error('Invalid memory preferences');if(!['Quiet','Command','Coach','Planner','Builder'].includes(r.mode))throw Error('Invalid Caelum mode')}
@@ -35,6 +38,7 @@ export function validateBackup(input){let backup=structuredClone(input);if(!back
  for(const a of t.masteryAwards){if(a.id!==a.skill+':'+a.levelId||!t.skillDefinitions.some(s=>s.id===a.skill&&s.levelDefinitions.some(l=>l.id===a.levelId)))throw Error('Invalid mastery award');date(a.date);text(a.name,'mastery name')}
  for(const r of [...t.records,...t.recordEvents]){num(r.value,0,10000000,'record value');if(!t.sessions.some(s=>s.id===r.sourceSession&&s.logs.some(l=>l.id===r.sourceSet)))throw Error('PR source set is missing');text(r.type,'record type');text(r.unit,'record unit')}
  for(const r of t.personalRecurrences)validatePersonalBlock(r,true);
+ validateGameTables(t);
  return backup;
 }
 export function backupSummary(backup){return {version:backup.schemaVersion,records:Object.values(backup.tables).reduce((s,rows)=>s+rows.length,0),sessions:backup.tables.sessions.length,exportedAt:backup.exportedAt}}

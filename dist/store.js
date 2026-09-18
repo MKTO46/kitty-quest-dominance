@@ -1,9 +1,10 @@
 import {initialConfiguration,initialExercises,initialGoals} from './config.js';
 import {phase2Seed} from './training-data.js';
-export const DATABASE_VERSION=5;
+import {gameStores,gameSeeds,legacyLedger} from './game-data.js';
+export const DATABASE_VERSION=6;
 export const BASE_STORES=['preferences','sessions','water','routineLogs','events','attempts','metrics','checkins','rewards','templates'];
 export const PHASE2_STORES=['skillDefinitions','soreness','equipmentProfiles','records','recordEvents','masteryAwards','personalRecurrences'];
-export const stores=[...BASE_STORES,'configurations','exercises','goals','dailyStates','edits',...PHASE2_STORES];
+export const stores=[...BASE_STORES,'configurations','exercises','goals','dailyStates','edits',...PHASE2_STORES,...gameStores];
 // Append one migration per released version; preserve old migrations unchanged.
 export const migrations=[{version:1,upgrade(db){for(const s of BASE_STORES)db.createObjectStore(s,{keyPath:'id'})}},{version:2,upgrade(db,transaction){for(const s of ['configurations','exercises','goals','dailyStates','edits'])db.createObjectStore(s,{keyPath:'id'});for(const s of ['sessions','water','routineLogs','events','attempts','metrics','checkins','rewards'])transaction.objectStore(s).createIndex('date','date',{unique:false});transaction.objectStore('edits').createIndex('recordId','recordId',{unique:false});transaction.objectStore('configurations').put(initialConfiguration);for(const e of initialExercises)transaction.objectStore('exercises').put(e);for(const g of initialGoals)transaction.objectStore('goals').put(g)}}];
 // Pre-action-layer pilot builds could create two Main slots in two open tabs.
@@ -14,6 +15,7 @@ migrations.push({version:4,upgrade(db,transaction){for(const name of PHASE2_STOR
 // Trial-specific movements preserve the original hang requirement separately from scapular reps.
 export function normalizeTrialMovements(skills){for(const skill of skills)for(const level of skill.levelDefinitions)for(const r of level.requirements)if(!r.exerciseId)r.exerciseId=skill.id==='pull'&&level.id==='pull-0'&&r.id==='endurance'?'hang':level.exerciseId;return skills}
 migrations.push({version:5,upgrade(db,transaction){const store=transaction.objectStore('skillDefinitions'),r=store.getAll();r.onsuccess=()=>{for(const skill of normalizeTrialMovements(r.result))store.put(skill)}}});
+migrations.push({version:6,upgrade(db,transaction){for(const name of gameStores)db.createObjectStore(name,{keyPath:'id'});const seed=gameSeeds();transaction.objectStore('gameConfigurations').put(seed.configuration);transaction.objectStore('gameProfile').put(seed.profile);transaction.objectStore('gameInventory').put(seed.inventory);transaction.objectStore('gameInventory').put(seed.title);const old=transaction.objectStore('rewards').getAll();old.onsuccess=()=>{for(const r of legacyLedger(old.result))transaction.objectStore('rewardLedger').put(r)};transaction.objectStore('rewardLedger').createIndex('date','date',{unique:false})}});
 export const dayKey=(date=new Date())=>`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 export const uid=()=>crypto.randomUUID();
 const request=r=>new Promise((resolve,reject)=>{r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});
@@ -23,7 +25,7 @@ export class Repository{
  close(){this.db?.close()}
  async transact(names,work,mode='readwrite'){const tx=this.db.transaction(names,mode);const completed=new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error||Error('Storage transaction failed.'));tx.onabort=()=>reject(tx.error||Error('Storage transaction was cancelled.'))});const api={all:s=>request(tx.objectStore(s).getAll()),get:(s,id)=>request(tx.objectStore(s).get(id)),put:(s,r)=>request(tx.objectStore(s).put(structuredClone(r))),clear:s=>request(tx.objectStore(s).clear())};try{const result=await work(api);await completed;return result}catch(error){try{tx.abort()}catch{}await completed.catch(()=>{});throw error}}
  all(s){return this.transact([s],t=>t.all(s),'readonly')}
- put(s,r){return this.transact([s],async t=>{if(s==='sessions'){const existing=await t.get(s,r.id);if(existing&&['completed','partial'].includes(existing.status)&&JSON.stringify(existing)!==JSON.stringify(r))throw Error('Historical sessions require a tracked correction action.')}if(s==='rewards'){const existing=await t.get(s,r.id);if(existing&&JSON.stringify(existing)!==JSON.stringify(r))throw Error('Reward entries are immutable.')}await t.put(s,r);return r})}
+ put(s,r){return this.transact([s],async t=>{if(s==='sessions'){const existing=await t.get(s,r.id);if(existing&&['completed','partial'].includes(existing.status)&&JSON.stringify(existing)!==JSON.stringify(r))throw Error('Historical sessions require a tracked correction action.')}if(['rewards','rewardLedger','gameBadges','bossClears'].includes(s)){const existing=await t.get(s,r.id);if(existing&&JSON.stringify(existing)!==JSON.stringify(r))throw Error('Reward entries are immutable.')}await t.put(s,r);return r})}
  snapshot(){return this.transact(stores,async t=>({schemaVersion:DATABASE_VERSION,format:'kitty-quest-backup',exportedAt:new Date().toISOString(),tables:Object.fromEntries(await Promise.all(stores.map(async s=>[s,await t.all(s)])))}),'readonly')}
 }
 export const repository=new Repository();
