@@ -1,4 +1,4 @@
-const CACHE='kitty-quest-shell-transformation-v6';
+const CACHE='kitty-quest-shell-transformation-v7';
 const ASSETS=['./','./index.html','./manifest.webmanifest','./style.css','./app.js','./transformation.js','./transformation-ui.js','./store.js','./engine.js','./config.js','./actions.js','./backup.js','./training-data.js','./training.js','./training-actions.js','./schedule.js','./phase2-ui.js','./game-data.js','./game.js','./game-actions.js','./game-backup.js','./game-ui.js','./profile.js','./muscle-data.js','./muscle.js','./muscle-actions.js','./muscle-ui.js','./testing.js','./testing-ui.js','./favicon.svg','./fonts.css','./icons/apple-touch-icon.png','./icons/icon-192.png','./icons/icon-512.png','./icons/icon-maskable-512.png',...Array.from({length:8},(_,i)=>'./fonts/font-'+i+'.ttf')];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith('kitty-quest-shell-')&&key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));
