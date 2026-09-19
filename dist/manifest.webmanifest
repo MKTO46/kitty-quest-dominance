@@ -1,0 +1,19 @@
+{
+  "id": "./",
+  "name": "Kitty Quest 2.0: Dominance",
+  "short_name": "Kitty Quest",
+  "description": "Your offline training, capability, and daily life command center.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait-primary",
+  "background_color": "#090a0c",
+  "theme_color": "#090a0c",
+  "categories": ["fitness", "health", "lifestyle"],
+  "icons": [
+    {"src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}
